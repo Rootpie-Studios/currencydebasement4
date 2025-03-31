@@ -1,11 +1,11 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { Head } from "@inertiajs/vue3";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
 
 const hoveredCountry = ref("");
-const selectedYear = ref(1971);
+const selectedYear = ref(2017);
 const goldData = ref({});
 const exchangeRates = ref({});
 const gainPercentage = ref(null);
@@ -24,6 +24,30 @@ const usdCountries = [
     "Micronesia",
     "Palau",
 ];
+
+const euroCountries = [
+    "Germany",
+    "France",
+    "Italy",
+    "Spain",
+    "Portugal",
+    "Ireland",
+    "Netherlands",
+    "Belgium",
+    "Luxembourg",
+    "Austria",
+    "Finland",
+    "Greece",
+    "Slovenia",
+    "Cyprus",
+    "Malta",
+    "Slovakia",
+    "Estonia",
+    "Latvia",
+    "Lithuania",
+];
+
+const dkkCountries = ["Denmark", "Greenland", "Faroe Islands"];
 
 // Load both datasets
 async function loadData() {
@@ -52,8 +76,16 @@ async function loadData() {
 }
 
 function calculateGain(country) {
+    if (euroCountries.includes(country)) {
+        return calculateGainForEuro(country);
+    }
+
+    if (dkkCountries.includes(country)) {
+        country = "Denmark"; // Use Denmark's data for all DKK countries
+    }
+
     const startPrice = goldData.value[selectedYear.value];
-    const currentPrice = goldData.value[2024];
+    const currentPrice = goldData.value[2017];
 
     if (usdCountries.includes(country)) {
         const percentageGain = (
@@ -102,7 +134,100 @@ function calculateGain(country) {
     }
 }
 
+function calculateGainForEuro(country) {
+    const startPrice = goldData.value[selectedYear.value];
+    const currentPrice = goldData.value[2017];
+
+    const euroRates = exchangeRates.value["Euro"];
+    if (!euroRates) return null;
+
+    if (selectedYear.value < 1999) return null;
+
+    const startExRate = euroRates[selectedYear.value];
+    const endExRate = euroRates["2017"];
+
+    if (!startExRate || !endExRate) return null;
+
+    const startPriceLocal = startPrice * startExRate;
+    const endPriceLocal = currentPrice * endExRate;
+
+    const percentageGain = (
+        ((endPriceLocal - startPriceLocal) / startPriceLocal) *
+        100
+    ).toFixed(2);
+    const percentageLoss = (
+        ((startPriceLocal - endPriceLocal) / endPriceLocal) *
+        100
+    ).toFixed(2);
+
+    return {
+        gain: percentageGain,
+        loss: Math.abs(percentageLoss),
+    };
+}
+
+function calculateUSDComparison(country) {
+    if (usdCountries.includes(country)) return null; // No comparison needed for USD countries
+
+    const startYear = selectedYear.value;
+    const endYear = "2017";
+
+    if (euroCountries.includes(country)) {
+        const euroRates = exchangeRates.value["Euro"];
+        if (!euroRates || !euroRates[startYear] || !euroRates[endYear])
+            return null;
+
+        const startRate = euroRates[startYear];
+        const endRate = euroRates[endYear];
+
+        const percentageChange = (
+            ((1 / endRate - 1 / startRate) / (1 / startRate)) *
+            100
+        ).toFixed(2);
+        return {
+            gain: percentageChange,
+            loss: Math.abs(percentageChange),
+        };
+    }
+
+    if (dkkCountries.includes(country)) {
+        country = "Denmark";
+    }
+
+    const countryRates = exchangeRates.value[country];
+    if (!countryRates || !countryRates[startYear] || !countryRates[endYear])
+        return null;
+
+    const startRate = countryRates[startYear];
+    const endRate = countryRates[endYear];
+
+    const percentageChange = (
+        ((1 / endRate - 1 / startRate) / (1 / startRate)) *
+        100
+    ).toFixed(2);
+    return {
+        gain: percentageChange,
+        loss: Math.abs(percentageChange),
+    };
+}
+
 function getColorForCountry(country) {
+    if (dkkCountries.includes(country)) {
+        const countryRates = exchangeRates.value["Denmark"]; // Use Denmark's rates for all DKK countries
+        if (!countryRates) return "#d3d3d3";
+
+        const gain = calculateGain("Denmark"); // Use Denmark's calculations
+        if (!gain) return "#d3d3d3";
+
+        return gain.gain > 0
+            ? `rgb(255, ${255 - Math.min(Math.abs(gain.gain) / 2, 255)}, ${
+                  255 - Math.min(Math.abs(gain.gain) / 2, 255)
+              })`
+            : `rgb(${255 - Math.min(Math.abs(gain.gain) / 2, 255)}, 255, ${
+                  255 - Math.min(Math.abs(gain.gain) / 2, 255)
+              })`;
+    }
+
     if (usdCountries.includes(country)) {
         const gain = calculateGain(country);
         if (!gain) return "#d3d3d3"; // gray for no data
@@ -113,6 +238,24 @@ function getColorForCountry(country) {
             : `rgb(${255 - Math.min(Math.abs(gain.gain), 255)}, 255, ${
                   255 - Math.min(Math.abs(gain.gain), 255)
               })`; // green for gain
+    }
+
+    // Check if it's a Eurozone country
+    if (euroCountries.includes(country)) {
+        const euroRates = exchangeRates.value["Euro"];
+        if (!euroRates) return "#d3d3d3";
+
+        // Use Euro data for Eurozone countries
+        const gain = calculateGainForEuro(country);
+        if (!gain) return "#d3d3d3";
+
+        return gain.gain > 0
+            ? `rgb(255, ${255 - Math.min(Math.abs(gain.gain) / 2, 255)}, ${
+                  255 - Math.min(Math.abs(gain.gain) / 2, 255)
+              })`
+            : `rgb(${255 - Math.min(Math.abs(gain.gain) / 2, 255)}, 255, ${
+                  255 - Math.min(Math.abs(gain.gain) / 2, 255)
+              })`;
     }
 
     const countryRates = exchangeRates.value[country];
@@ -132,14 +275,21 @@ function getColorForCountry(country) {
 }
 
 function drawMap() {
+    // Clear existing SVG content
+    d3.select("#map").selectAll("*").remove();
+
     const width = window.innerWidth;
     const height = window.innerHeight - 60;
-    const svg = d3.select("#map").attr("width", width).attr("height", height);
+    const svg = d3
+        .select("#map")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("viewBox", [0, 0, width, height]);
+
     const projection = d3
         .geoNaturalEarth1()
         .scale(Math.min(width / 5.5, height / 3.5))
         .translate([width / 2, height / 2.2]);
-    const path = d3.geoPath().projection(projection);
 
     d3.json(
         "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"
@@ -156,7 +306,7 @@ function drawMap() {
             .data(filteredCountries.features)
             .enter()
             .append("path")
-            .attr("d", path)
+            .attr("d", d3.geoPath().projection(projection))
             .attr("fill", (d) => getColorForCountry(d.properties.name))
             .attr("stroke", "#fff")
             .attr("cursor", "pointer")
@@ -189,6 +339,16 @@ function updateMapColors() {
 onMounted(async () => {
     await loadData();
     drawMap();
+
+    // Add resize event listener
+    window.addEventListener("resize", () => {
+        drawMap();
+    });
+});
+
+// Clean up resize listener when component is unmounted
+onUnmounted(() => {
+    window.removeEventListener("resize", drawMap);
 });
 </script>
 
@@ -200,17 +360,21 @@ onMounted(async () => {
         >
             Currency Debasement
         </h1>
-        <div class="fixed top-4 left-4 flex items-center gap-2">
+
+        <div class="flex items-center gap-2 justify-center py-4">
             <input
                 type="range"
                 v-model="selectedYear"
                 :min="1971"
-                :max="2024"
-                class="w-48"
+                :max="2017"
+                class="flex-1 max-w-md"
                 @input="updateMapColors"
             />
-            <span class="text-black dark:text-white">{{ selectedYear }}</span>
+            <span class="text-black dark:text-white w-16 text-right">{{
+                selectedYear
+            }}</span>
         </div>
+
         <div class="map-container relative">
             <svg id="map"></svg>
             <div
@@ -230,7 +394,7 @@ onMounted(async () => {
                                     "United States of America"
                                         ? "USD"
                                         : hoveredCountry
-                                }}'s currency since {{ selectedYear }}
+                                }}'s currency from {{ selectedYear }} to 2017
                                 <br />
                                 {{
                                     hoveredCountry ===
@@ -238,8 +402,8 @@ onMounted(async () => {
                                         ? "USD"
                                         : hoveredCountry
                                 }}'s currency has lost
-                                {{ gainPercentage.loss }}% against gold since
-                                {{ selectedYear }}
+                                {{ gainPercentage.loss }}% against gold from
+                                {{ selectedYear }} to 2017
                             </template>
                             <template v-else>
                                 Gold has lost
@@ -249,7 +413,7 @@ onMounted(async () => {
                                     "United States of America"
                                         ? "USD"
                                         : hoveredCountry
-                                }}'s currency since {{ selectedYear }}
+                                }}'s currency from {{ selectedYear }} to 2017
                                 <br />
                                 {{
                                     hoveredCountry ===
@@ -258,7 +422,41 @@ onMounted(async () => {
                                         : hoveredCountry
                                 }}'s currency has gained
                                 {{ Math.abs(gainPercentage.loss) }}% against
-                                gold since {{ selectedYear }}
+                                gold from {{ selectedYear }} to 2017
+                            </template>
+
+                            <template
+                                v-if="calculateUSDComparison(hoveredCountry)"
+                            >
+                                <div
+                                    class="mt-2 pt-2 border-t border-gray-200 dark:border-zinc-700"
+                                >
+                                    <template
+                                        v-if="
+                                            calculateUSDComparison(
+                                                hoveredCountry
+                                            ).gain > 0
+                                        "
+                                    >
+                                        {{ hoveredCountry }}'s currency has
+                                        gained
+                                        {{
+                                            calculateUSDComparison(
+                                                hoveredCountry
+                                            ).gain
+                                        }}% against USD from
+                                        {{ selectedYear }} to 2017
+                                    </template>
+                                    <template v-else>
+                                        {{ hoveredCountry }}'s currency has lost
+                                        {{
+                                            calculateUSDComparison(
+                                                hoveredCountry
+                                            ).loss
+                                        }}% against USD from
+                                        {{ selectedYear }} to 2017
+                                    </template>
+                                </div>
                             </template>
                         </span>
                     </template>
@@ -313,9 +511,14 @@ onMounted(async () => {
     height: 100vh;
     overflow: hidden;
 }
-#map {
+.map-container {
     width: 100%;
     height: calc(100vh - 60px);
+    position: relative;
+}
+#map {
+    width: 100%;
+    height: 100%;
     display: block;
 }
 .tooltip {
@@ -324,5 +527,42 @@ onMounted(async () => {
 }
 blockquote {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+input[type="range"] {
+    -webkit-appearance: none;
+    height: 8px;
+    background: #d3d3d3;
+    border-radius: 4px;
+    outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #666;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #666;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.dark input[type="range"] {
+    background: #444;
+}
+
+.dark input[type="range"]::-webkit-slider-thumb {
+    background: #999;
+}
+
+.dark input[type="range"]::-moz-range-thumb {
+    background: #999;
 }
 </style>
